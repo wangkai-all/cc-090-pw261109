@@ -1,0 +1,11 @@
+{
+  "name": "local-sampling-lab",
+  "version": "1.0.0",
+  "description": "本地数据抽样实验台：简单随机 / 分层 / 时间段抽样，可复现方案与统计对照",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/sampling.test.js",
+    "serve": "python3 -m http.server 8080"
+  }
+}

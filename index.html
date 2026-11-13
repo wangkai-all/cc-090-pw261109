@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>本地数据抽样实验台</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>本地数据抽样实验台</h1>
+      <p class="subtitle">所有计算在浏览器本地完成，不上传数据、不修改原表；同种子同输入结果一致。</p>
+    </div>
+    <button id="theme-toggle" class="btn btn-ghost" type="button" aria-label="切换明暗主题">🌙 暗色</button>
+  </header>
+
+  <main class="layout">
+    <!-- 左侧：数据与配置 -->
+    <section class="panel panel-left">
+      <h2>1. 选择数据表</h2>
+      <div class="file-row">
+        <label class="btn btn-primary">
+          选择 CSV / TSV 文件
+          <input type="file" id="file-input" accept=".csv,.tsv,.txt" hidden />
+        </label>
+        <button id="demo-btn" class="btn" type="button">载入演示数据</button>
+      </div>
+      <div id="dataset-meta" class="dataset-meta muted">尚未载入数据。</div>
+      <div id="ingest-warnings" class="warning-list"></div>
+
+      <h2>2. 抽样配置</h2>
+      <form id="config-form">
+        <fieldset id="method-fieldset">
+          <legend>抽样方式</legend>
+          <label class="radio"><input type="radio" name="method" value="simple" checked /> 简单随机抽样</label>
+          <label class="radio"><input type="radio" name="method" value="stratified" /> 分层抽样</label>
+          <label class="radio"><input type="radio" name="method" value="time" /> 按时间段抽样（连续区间）</label>
+        </fieldset>
+
+        <div class="form-row">
+          <label for="sample-size">样本量（行）</label>
+          <input type="number" id="sample-size" min="1" step="1" value="40" required />
+        </div>
+        <div class="form-row">
+          <label for="seed">随机种子</label>
+          <input type="number" id="seed" value="42" step="1" />
+          <small class="muted">整数；种子与输入一致时抽样结果完全一致。</small>
+        </div>
+
+        <fieldset id="stratified-options" class="conditional hidden" disabled>
+          <legend>分层参数</legend>
+          <div class="form-row">
+            <label for="stratify-column">分层字段</label>
+            <select id="stratify-column"></select>
+          </div>
+          <div class="form-row">
+            <label>分配方式</label>
+            <label class="radio"><input type="radio" name="allocation" value="proportional" checked /> 按比例分配</label>
+            <label class="radio"><input type="radio" name="allocation" value="floor" /> 每层保底</label>
+          </div>
+          <div class="form-row hidden" id="floor-row">
+            <label for="floor-per-stratum">每层保底数量（行）</label>
+            <input type="number" id="floor-per-stratum" min="1" step="1" value="3" />
+          </div>
+        </fieldset>
+
+        <fieldset id="time-options" class="conditional hidden" disabled>
+          <legend>时间段参数（保留连续区间，不打散）</legend>
+          <div class="form-row">
+            <label for="time-column">时间字段</label>
+            <select id="time-column"></select>
+          </div>
+          <div class="form-row">
+            <label for="time-granularity">时间粒度</label>
+            <select id="time-granularity">
+              <option value="hour">小时</option>
+              <option value="day" selected>天</option>
+              <option value="week">周（周一起）</option>
+              <option value="month">月</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label for="block-length">每个连续区间包含的桶数</label>
+            <input type="number" id="block-length" min="1" step="1" value="1" />
+          </div>
+          <div class="form-row">
+            <label>区间选择口径</label>
+            <label class="radio"><input type="radio" name="time-mode" value="blocks" checked /> 直接指定区间数（样本量 = 区间个数）</label>
+            <label class="radio"><input type="radio" name="time-mode" value="targetRows" /> 按目标行数估算区间数</label>
+          </div>
+        </fieldset>
+
+        <div class="actions">
+          <button type="submit" class="btn btn-primary" id="run-btn" disabled>生成抽样方案</button>
+          <button type="button" class="btn" id="replay-btn" disabled>复现当前方案</button>
+        </div>
+        <div id="config-error" class="error-box hidden"></div>
+      </form>
+
+      <h2>3. 方案记录</h2>
+      <div id="plan-status" class="plan-status muted">尚未生成方案。</div>
+      <div class="actions wrap">
+        <button type="button" class="btn btn-small" id="export-plan-btn" disabled>导出方案 JSON</button>
+        <label class="btn btn-small">
+          导入方案复现
+          <input type="file" id="import-plan-input" accept=".json,application/json" hidden />
+        </label>
+      </div>
+
+      <h2>4. 样本量影响扫描</h2>
+      <div class="form-row">
+        <label for="sweep-sizes">样本量序列（逗号分隔）</label>
+        <input type="text" id="sweep-sizes" value="20,40,80,120,200" />
+      </div>
+      <button type="button" class="btn" id="sweep-btn" disabled>运行扫描（同种子）</button>
+    </section>
+
+    <!-- 右侧：结果 -->
+    <section class="panel panel-right">
+      <div id="empty-state" class="empty-state">
+        <p>载入数据并生成方案后，这里会展示：</p>
+        <ul>
+          <li>输入指纹、算法参数与随机种子</li>
+          <li>类别比例、空值率与数值分布的总体 vs 样本对照</li>
+          <li>层容量不足、空字段、时间格式混乱的覆盖范围提示</li>
+          <li>带来源行号的结果导出（不改动原表）</li>
+        </ul>
+      </div>
+
+      <div id="results" class="hidden">
+        <div class="result-header">
+          <h2>抽样结果</h2>
+          <div class="actions wrap">
+            <button type="button" class="btn btn-small" id="export-sample-btn">导出样本 CSV（含来源行号）</button>
+            <button type="button" class="btn btn-small" id="export-stats-btn">导出统计对照 CSV</button>
+          </div>
+        </div>
+
+        <div id="summary-tiles" class="tiles"></div>
+        <div id="result-warnings" class="warning-list"></div>
+        <div id="coverage-panel"></div>
+
+        <h3>分层执行明细</h3>
+        <div id="strata-panel" class="hidden"></div>
+        <div id="blocks-panel" class="hidden"></div>
+
+        <h3>类别比例对照</h3>
+        <div class="chart-toolbar"><button type="button" class="btn btn-ghost btn-small" id="cat-table-toggle">查看数据表</button></div>
+        <div id="cat-chart"></div>
+
+        <h3>空值率对照</h3>
+        <div id="null-table"></div>
+
+        <h3>数值分布对照</h3>
+        <div id="numeric-panels"></div>
+
+        <h3>样本预览（前 20 行，含来源行号）</h3>
+        <div class="table-scroll" id="sample-preview"></div>
+      </div>
+
+      <div id="sweep-result" class="hidden">
+        <h2>样本量影响扫描</h2>
+        <div class="chart-toolbar"><button type="button" class="btn btn-ghost btn-small" id="sweep-table-toggle">查看数据表</button></div>
+        <div id="sweep-chart"></div>
+        <p class="muted small">蓝线：最大空值率偏差（百分点）；橙线：最大类别比例偏差（分层时，百分点）。点悬停可见具体数值。</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="app-footer muted">
+    本地运行 · 算法版本 local-sampling-lab@1.0.0 · 抽样结果按来源行号升序展示，原始文件只读。
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
